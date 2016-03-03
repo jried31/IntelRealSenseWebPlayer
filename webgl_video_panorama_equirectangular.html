@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>Our Demo</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<style>
+			body {
+				background-color: #000000;
+				margin: 0px;
+				overflow: hidden;
+			}
+
+			#info {
+				position: absolute;
+				top: 0px; width: 100%;
+				color: #ffffff;
+				padding: 5px;
+				font-family:Monospace;
+				font-size:13px;
+				font-weight: bold;
+				text-align:center;
+			}
+
+			a {
+				color: #ffffff;
+			}
+
+			.screen {
+				color:white;
+				font-size: 14px;
+			}
+		</style>
+	</head>
+	<body>
+
+		<div id="container"></div>
+
+		<script src="../build/three.min.js"></script>
+	    <script type="text/javascript" src="../build/realsense/jquery-1.11.0.min.js"></script>
+	    <script type="text/javascript" src="../build/realsense/promise-1.0.0.min.js"></script>
+	    <script type="text/javascript" src="../build/realsense/realsense-2.0.js"></script>
+	    <script type="text/javascript" src="../build/realsense/realsenseinfo-2.0.js"></script>
+    	<script type="text/javascript">
+        	$(document).ready(function () {
+        		//JERRID: OpenGL Stuff
+				var camera, scene, renderer;
+				var video, videoTexture;
+
+				var texture_placeholder,
+				isUserInteracting = false,
+				onMouseDownMouseX = 0, onMouseDownMouseY = 0,
+				lon = 0, onMouseDownLon = 0,
+				lat = 0, onMouseDownLat = 0,
+				phi = 0, theta = 0;
+
+				function init() {
+					var container, mesh;
+
+					container = document.getElementById( 'container' );
+
+					camera = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 1, 1100 );
+					camera.target = new THREE.Vector3( 0, 0, 0 );
+
+					scene = new THREE.Scene();
+
+					var geometry = new THREE.SphereGeometry( 500, 60, 40 );
+					geometry.applyMatrix( new THREE.Matrix4().makeScale( -1, 1, 1 ) );
+
+					video = document.createElement('video');
+					video.width = 640;
+					video.height = 360;
+					video.autoplay = true;
+					video.loop = true; 
+
+					video.crossOrigin='anonymous'
+					video.src = "videos/kolor-balloon-icare-full-hd.mp4";
+
+					videoTexture = new THREE.Texture( video );
+					videoTexture.generateMipmaps = false;
+
+					var material   = new THREE.MeshBasicMaterial( { map : videoTexture } );
+
+					mesh = new THREE.Mesh( geometry, material );
+					
+					scene.add( mesh );
+
+					renderer = new THREE.WebGLRenderer();
+					renderer.setSize( window.innerWidth, window.innerHeight - 100);
+					container.appendChild( renderer.domElement );
+
+					document.addEventListener( 'mousedown', onDocumentMouseDown, false );
+					document.addEventListener( 'mousemove', onDocumentMouseMove, false );
+					document.addEventListener( 'mouseup', onDocumentMouseUp, false );
+					document.addEventListener( 'mousewheel', onDocumentMouseWheel, false );
+					document.addEventListener( 'DOMMouseScroll', onDocumentMouseWheel, false);
+					window.addEventListener( 'resize', onWindowResize, false );
+				}
+
+				function initRealSense() {
+		            // check platform compatibility
+		            RealSenseInfo(['hand'], function (info) {
+		                if (info.IsReady == true) {
+		                    $('#info').append('<b>Platform supports Intel� RealSense� SDK feature</b>');
+		                    status('OK');
+		                } else {
+		                    status('Platform not supported: ' + info.responseText);
+		                    if (info.IsPlatformSupported != true) {
+		                        $('#info').append('<b>Intel� RealSense� 3D camera not found</b>');
+		                    } else if (info.IsBrowserSupported != true) {
+		                        $('#info').append('<b>Please update your browser to latest version</b>');
+		                    } else {
+		                        $('#info').append('<b>Please download and install the following update(s) before running sample: </b>');
+		                        for (i = 0; i < info.Updates.length; i++) {
+		                            $('#info').append('<a href="' + info.Updates[i].url + '">' + info.Updates[i].href + '</a><br>');
+		                        }
+		                    }
+		                }
+		            })
+    
+					$('#play').click(function () {
+						if(video !== undefined)
+							video.play();
+		            });
+
+					$('#pause').click(function () {
+						if(video !== undefined)
+							video.pause();
+		            });
+
+					$('#stop').click(function () {
+						if(video !== undefined){
+							video.pause();
+							video.currentTime = 0;
+						}
+		            });
+
+					$('#disableRealsense').click(function () {
+		                document.getElementById("disableRealsense").disabled = true;
+		                sense.Close().then(function (result) {//Stop RealSense
+		                    status('Stopped');
+		                    document.getElementById("enableRealsense").disabled = false;
+		                });
+		            });
+
+		            $('#enableRealsense').click(function () {
+		                document.getElementById("enableRealsense").disabled = true;
+		                PXCMSenseManager_CreateInstance().then(function (result) {
+		                    sense = result;
+		                    return sense.EnableHand(onHandData);
+		                }).then(function (result) {
+		                    status('Init started');
+		                    return sense.Init(onConnect);
+		                }).then(function (result) {
+		                    return sense.CreateHandConfiguration();
+		                }).then(function (result) {
+		                    handConfiguration = result;
+
+		                    return handConfiguration.DisableAllAlerts();//JERRID Dont need it .EnableAllAlerts
+		                }).then(function (result) {
+		                    return handConfiguration.EnableAllGestures(false);//JERRID We want gestures
+		                }).then(function (result) {
+		                    return handConfiguration.ApplyChanges();
+		                }).then(function (result) {
+		                    return sense.QueryCaptureManager();
+		                }).then(function (result) {
+		                    capture = result;
+		                    return capture.QueryImageSize(capture.STREAM_TYPE_DEPTH);
+		                }).then(function (result) {
+		                    imageSize = result.size;
+		                    return sense.StreamFrames();
+		                }).then(function (result) {
+		                    status('Streaming ' + imageSize.width + 'x' + imageSize.height);
+		                    document.getElementById("disableRealsense").disabled = false;
+		                }).catch(function (error) {
+		                    status('Init failed: ' + JSON.stringify(error));
+		                    document.getElementById("enableRealsense").disabled = false;
+		                });
+		            });
+				}
+
+
+        		//JERRID: RealSense Stuff --------------
+	            var sense;
+	            var capture;
+	            var imageSize;
+	            var handConfiguration;
+	            var currentGesture;
+				
+				function status(msg) {
+	                $('#status').text(msg);
+	            }
+
+	            var previousHandLocation=undefined;
+	            function onHandData(mid, module, data) {
+	                if (data.hands === undefined || data.hands.length === 0) return;
+
+            		//Look for ball of hand
+            		var currentHandLocation={wristX:0,wristY:0};
+
+            		//set current finger location
+            		if(data)
+                    var joints = data.hands[0].trackedJoint;
+                	if(joints === undefined || joints.length === 0)return;
+
+                    currentHandLocation['wristX'] = joints[0].positionImage.x;
+                    currentHandLocation['wristY'] = joints[0].positionImage.y;
+	                
+        
+
+	                if (data.gestures === undefined) return;
+
+	                //Specific Gesture Here
+	                for (g = 0; g < data.gestures.length; g++) {
+	                    $('#info').html('Gesture: Number ' + g + JSON.stringify(data.gestures[g]) + " Gesture: "+ data.gestures[g].name);
+	                    currentGesture = data.gestures[g].name;
+	                }
+	                if(currentGesture === 'two_fingers_pinch_open'){
+	                	//Update camera angle
+    					//convolve camera angle by scaler
+    					if(previousHandLocation === undefined){
+
+    					}
+
+    					diffX = previousHandLocation === undefined ? 0:(currentHandLocation['wristX'] - previousHandLocation['wristX']);
+    					diffY = previousHandLocation === undefined ? 0:(currentHandLocation['wristY'] -  previousHandLocation['wristY']);
+
+						lon = ( diffX) * 0.26 + lon;
+						lat = (diffY ) * 0.26 + lat;
+	                }
+	            		//set current finger location to previous
+	            		previousHandLocation = currentHandLocation;
+	            }
+
+	            function onConnect(device, data) {
+	                if (data.connected == false) {
+	                   alert('Alert Not connected: ' + JSON.stringify(data));
+	                }
+	            }
+
+	            /*
+	             * processGesture() invoked on a timer call to perform an action
+	             * NOTE: Turn camera angle gesture cannot be invoked here. This special case must be processed
+	             * at the time the hand event is fired for responsiveness. 
+	            */
+	            function processGesture(){
+	            	if(currentGesture === undefined)return;
+	            	console.log("gesture "+ currentGesture);
+
+	            	if(currentGesture === 'spreadfingers'){
+	            		video.play();
+		            }else if(currentGesture === 'tap'){
+	            		video.pause();
+	            	}else if(currentGesture === 'fist'){//stop
+	            		video.pause();
+	            		video.currentTime = 0;
+	            	}else if(currentGesture === 'full_pinch'){//stop
+	            		//camera.target.x=0;
+	            		//camera.target.y=0;
+	            		//camera.target.z=0;
+	            		lat=0;
+	            		lon=0;
+	            		//camera.lookAt( camera.target );
+	            	}
+
+	            }
+        		//--------------------
+
+				init();
+				initRealSense();//Jerrid Added this
+				animate();
+				//JERRID: set an interval for recognizing gesture
+				 setInterval(function(){processGesture()}, 1000);
+
+				function onWindowResize() {
+					camera.aspect = window.innerWidth / window.innerHeight;
+					camera.updateProjectionMatrix();
+					renderer.setSize( window.innerWidth, window.innerHeight - 100);
+				}
+
+				function onDocumentMouseDown( event ) {
+					event.preventDefault();
+					isUserInteracting = true;
+					onPointerDownPointerX = event.clientX;
+					onPointerDownPointerY = event.clientY;
+					onPointerDownLon = lon;
+					onPointerDownLat = lat;
+				}
+
+				function onDocumentMouseMove( event ) {
+					if ( isUserInteracting === true ) {
+						lon = ( onPointerDownPointerX - event.clientX ) * 0.1 + onPointerDownLon;
+						lat = ( event.clientY - onPointerDownPointerY ) * 0.1 + onPointerDownLat;
+					}
+				}
+
+				function onDocumentMouseUp( event ) {
+					isUserInteracting = false;
+				}
+
+				function onDocumentMouseWheel( event ) {
+					// WebKit
+					if ( event.wheelDeltaY ) {
+						camera.fov -= event.wheelDeltaY * 0.05;
+					// Opera / Explorer 9
+					} else if ( event.wheelDelta ) {
+						camera.fov -= event.wheelDelta * 0.05;
+					// Firefox
+					} else if ( event.detail ) {
+						camera.fov += event.detail * 1.0;
+					}
+					camera.updateProjectionMatrix();
+				}
+
+				function animate() {
+					requestAnimationFrame( animate );
+					update();
+				}
+
+				function update() {
+					if( video.readyState === video.HAVE_ENOUGH_DATA ){
+					  videoTexture.needsUpdate = true;
+					}
+				        //if ( isUserInteracting === false ) {
+					//	lon += 0.5;
+					//}
+
+					lat = Math.max( - 85, Math.min( 85, lat ) );
+					phi = THREE.Math.degToRad( 90 - lat );
+					theta = THREE.Math.degToRad( lon );
+
+					camera.target.x = 500 * Math.sin( phi ) * Math.cos( theta );
+					camera.target.y = 500 * Math.cos( phi );
+					camera.target.z = 500 * Math.sin( phi ) * Math.sin( theta );
+
+					camera.lookAt( camera.target );
+
+					/*
+					// distortion
+					camera.position.copy( camera.target ).negate();
+					*/
+					renderer.render( scene, camera );
+				}
+			});
+
+
+			
+		</script>
+
+		<!-- JERRID: REALSENSE STUFF HERE -->
+		
+		<br/>
+            <button id="enableRealsense">Enable Realsense</button>
+            <button id="disableRealsense" disabled="disabled">Disable Realsense</button>
+            <button id="play">PLAY</button>
+            <button id="pause">PAUSE</button>
+            <button id="stop">STOP</button>
+            <br/>
+            <div id="info" class="screen"></div>
+            
+			<div id="status" class="screen">JNK HERE</div>
+
+		<!-- END OF REAL SENSE STUFF -->
+	</body>
+</html>
